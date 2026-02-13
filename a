@@ -36,10 +36,26 @@ if old then old:Destroy() end
 local oldOverlay = CoreGui:FindFirstChild("SchmecktESPOverlay")
 if oldOverlay then oldOverlay:Destroy() end
 
+for _, plr in pairs(Players:GetPlayers()) do
+    if plr.Character then
+        local hl = plr.Character:FindFirstChild("SchmecktHighlight")
+        if hl then hl:Destroy() end
+    end
+end
+
+local map = Workspace:FindFirstChild("MAP")
+if map and map:FindFirstChild("Pads") then
+    for _, pad in ipairs(map.Pads:GetChildren()) do
+        local bg = pad:FindFirstChild("SchmecktPadESP")
+        if bg then bg:Destroy() end
+    end
+end
+
 local state = {
-    EspEnabled = true,
+    EspPlayers = true,
     TracersEnabled = true,
-    BoxEnabled = true
+    EspWeapons = false,
+    EspFood = false
 }
 
 local Theme = {
@@ -56,6 +72,17 @@ local Theme = {
 local LOGO_ASSET = "rbxassetid://121759217057084"
 local LOGO2_ASSET = "rbxassetid://118676632373972"
 
+local weaponNames = {
+    ["[Silencer]"] = true,
+    ["[Tactical Shotgun]"] = true,
+    ["[USP]"] = true,
+}
+
+local foodNames = {
+    ["[Bloxy Cola]"] = true,
+    ["[Pizza]"] = true,
+}
+
 local gui = Instance.new("ScreenGui")
 gui.Name = "SchmecktESPPanel"
 gui.ResetOnSpawn = false
@@ -71,7 +98,7 @@ overlay.Parent = CoreGui
 
 local MainFrame = Instance.new("Frame")
 MainFrame.Name = "MainFrame"
-MainFrame.Size = scaleUDim(250, 180)
+MainFrame.Size = scaleUDim(250, 240)
 MainFrame.Position = UDim2.new(0, 10 * SCALE, 0.5, 110 * SCALE)
 MainFrame.BackgroundColor3 = Theme.Background
 MainFrame.BackgroundTransparency = 0.02
@@ -170,7 +197,7 @@ HeaderSub.Parent = HeaderFrame
 
 local ButtonContainer = Instance.new("Frame")
 ButtonContainer.Name = "ButtonContainer"
-ButtonContainer.Size = UDim2.new(1, -(16 * SCALE), 0, 110 * SCALE)
+ButtonContainer.Size = UDim2.new(1, -(16 * SCALE), 0, 170 * SCALE)
 ButtonContainer.Position = UDim2.new(0, 8 * SCALE, 0, 60 * SCALE)
 ButtonContainer.BackgroundTransparency = 1
 ButtonContainer.Parent = MainFrame
@@ -230,7 +257,6 @@ local function CreateToggleButton(text, sharedKey)
     Button.MouseButton1Click:Connect(function()
         state[sharedKey] = not state[sharedKey]
         local enabled = state[sharedKey]
-
         TweenService:Create(ToggleCircle, TweenInfo.new(0.2, Enum.EasingStyle.Quart), {
             Position = enabled and UDim2.new(0, 20 * SCALE, 0.5, -(7 * SCALE)) or UDim2.new(0, 2 * SCALE, 0.5, -(7 * SCALE))
         }):Play()
@@ -244,9 +270,10 @@ local function CreateToggleButton(text, sharedKey)
     end)
 end
 
-CreateToggleButton("Master Switch", "EspEnabled")
-CreateToggleButton("Player Chams", "BoxEnabled")
+CreateToggleButton("Player Chams", "EspPlayers")
 CreateToggleButton("Tracers", "TracersEnabled")
+CreateToggleButton("ESP Weapons", "EspWeapons")
+CreateToggleButton("ESP Food", "EspFood")
 
 local lines = {}
 local function getLine()
@@ -264,19 +291,87 @@ local function getLine()
     return line
 end
 
+local padBillboards = {}
+
+local function ensurePadBillboard(pad, labelText, color)
+    if padBillboards[pad] then
+        padBillboards[pad].Enabled = true
+        return
+    end
+    local headPart = pad:FindFirstChild("Head") or pad:FindFirstChildWhichIsA("BasePart")
+    if not headPart then return end
+    local bb = Instance.new("BillboardGui")
+    bb.Name = "SchmecktPadESP"
+    bb.Adornee = headPart
+    bb.Size = UDim2.new(0, 200, 0, 30)
+    bb.StudsOffset = Vector3.new(0, 4, 0)
+    bb.AlwaysOnTop = true
+    bb.Parent = pad
+    local txt = Instance.new("TextLabel")
+    txt.Size = UDim2.new(1, 0, 1, 0)
+    txt.BackgroundTransparency = 1
+    txt.Text = labelText
+    txt.TextColor3 = color
+    txt.Font = Enum.Font.GothamBlack
+    txt.TextSize = 14
+    txt.TextStrokeTransparency = 0.3
+    txt.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    txt.Parent = bb
+    padBillboards[pad] = bb
+end
+
+local function removePadBillboard(pad)
+    if padBillboards[pad] then
+        padBillboards[pad]:Destroy()
+        padBillboards[pad] = nil
+    end
+end
+
+local function removeAllPadBillboards()
+    for pad, bb in pairs(padBillboards) do
+        pcall(function() bb:Destroy() end)
+    end
+    padBillboards = {}
+end
+
+local function removeAllHighlights()
+    for _, plr in pairs(Players:GetPlayers()) do
+        if plr.Character then
+            local hl = plr.Character:FindFirstChild("SchmecktHighlight")
+            if hl then hl:Destroy() end
+        end
+    end
+end
+
+local function cleanAllESP()
+    removeAllHighlights()
+    removeAllPadBillboards()
+    for _, line in ipairs(lines) do
+        line.Visible = false
+    end
+end
+
+local function getPadsFolder()
+    local m = Workspace:FindFirstChild("MAP")
+    if m and m:FindFirstChild("Pads") then return m.Pads end
+    return nil
+end
+
 local function updateESP()
     for _, line in ipairs(lines) do line.Visible = false end
-    
-    if not state.EspEnabled then return end
 
-    for _, plr in pairs(Players:GetPlayers()) do
-        if plr ~= lp and plr.Character then
-            local char = plr.Character
-            local root = char:FindFirstChild("HumanoidRootPart")
-            local hum = char:FindFirstChild("Humanoid")
+    if not Shared.VisualPanel then
+        cleanAllESP()
+        return
+    end
 
-            if root and hum and hum.Health > 0 then
-                if state.BoxEnabled then
+    if state.EspPlayers then
+        for _, plr in pairs(Players:GetPlayers()) do
+            if plr ~= lp and plr.Character then
+                local char = plr.Character
+                local root = char:FindFirstChild("HumanoidRootPart")
+                local hum = char:FindFirstChild("Humanoid")
+                if root and hum and hum.Health > 0 then
                     if not char:FindFirstChild("SchmecktHighlight") then
                         local hl = Instance.new("Highlight")
                         hl.Name = "SchmecktHighlight"
@@ -287,13 +382,19 @@ local function updateESP()
                         hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
                         hl.Parent = char
                     end
-                else
-                    if char:FindFirstChild("SchmecktHighlight") then
-                        char.SchmecktHighlight:Destroy()
-                    end
                 end
+            end
+        end
+    else
+        removeAllHighlights()
+    end
 
-                if state.TracersEnabled then
+    if state.TracersEnabled then
+        for _, plr in pairs(Players:GetPlayers()) do
+            if plr ~= lp and plr.Character then
+                local root = plr.Character:FindFirstChild("HumanoidRootPart")
+                local hum = plr.Character:FindFirstChild("Humanoid")
+                if root and hum and hum.Health > 0 then
                     local vec, onScreen = Camera:WorldToViewportPoint(root.Position)
                     if onScreen then
                         local line = getLine()
@@ -302,12 +403,42 @@ local function updateESP()
                         local distance = (endPos - startPos).Magnitude
                         local center = (startPos + endPos) / 2
                         local angle = math.atan2(endPos.Y - startPos.Y, endPos.X - startPos.X)
-                        
                         line.Size = UDim2.new(0, distance, 0, 1.5)
                         line.Position = UDim2.new(0, center.X, 0, center.Y)
                         line.Rotation = math.deg(angle)
                         line.Visible = true
                     end
+                end
+            end
+        end
+    end
+
+    local padsFolder = getPadsFolder()
+    if padsFolder then
+        if state.EspWeapons then
+            for _, pad in ipairs(padsFolder:GetChildren()) do
+                if weaponNames[pad.Name] then
+                    ensurePadBillboard(pad, pad.Name, Color3.fromRGB(255, 50, 50))
+                end
+            end
+        else
+            for _, pad in ipairs(padsFolder:GetChildren()) do
+                if weaponNames[pad.Name] then
+                    removePadBillboard(pad)
+                end
+            end
+        end
+
+        if state.EspFood then
+            for _, pad in ipairs(padsFolder:GetChildren()) do
+                if foodNames[pad.Name] then
+                    ensurePadBillboard(pad, pad.Name, Color3.fromRGB(50, 255, 100))
+                end
+            end
+        else
+            for _, pad in ipairs(padsFolder:GetChildren()) do
+                if foodNames[pad.Name] then
+                    removePadBillboard(pad)
                 end
             end
         end
@@ -342,4 +473,4 @@ UserInputService.InputEnded:Connect(function(input)
 end)
 
 MainFrame.Size = UDim2.new(0, 0, 0, 0)
-TweenService:Create(MainFrame, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Size = scaleUDim(250, 180)}):Play()
+TweenService:Create(MainFrame, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Size = scaleUDim(250, 240)}):Play()
