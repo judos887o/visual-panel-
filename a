@@ -1,26 +1,34 @@
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
-local CoreGui = game:GetService("CoreGui")
 local Workspace = game:GetService("Workspace")
 local TweenService = game:GetService("TweenService")
-local Camera = Workspace.CurrentCamera
+local UserInputService = game:GetService("UserInputService")
+local SoundService = game:GetService("SoundService")
+local CoreGui = game:GetService("CoreGui")
 
 local lp = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
 local Shared = getgenv().SchmecktHubPC or {}
+getgenv().SchmecktHubPC = Shared
 local key = "SchmecktESP"
 
-local SCALE = 1
-if Shared.Platform == "Mobile" then
-    SCALE = 1 / 2.2
+local IS_MOBILE = Shared.Platform == "Mobile" or UserInputService.TouchEnabled
+local SCALE = IS_MOBILE and (1 / 2.2) or 1
+local function s(v) return math.floor(v * SCALE) end
+
+local CLICK_SOUND_ID = "rbxassetid://100809160609628"
+
+local clickSound = SoundService:FindFirstChild("SchmecktClickSound")
+if not clickSound then
+    clickSound = Instance.new("Sound")
+    clickSound.Name = "SchmecktClickSound"
+    clickSound.SoundId = CLICK_SOUND_ID
+    clickSound.Volume = 0.5
+    clickSound.Parent = SoundService
 end
 
-local function scaleUDim(x, y)
-    return UDim2.new(0, x * SCALE, 0, y * SCALE)
-end
-
-local function scaleSize(s)
-    return math.floor(s * SCALE)
+local function playClick()
+    task.spawn(function() pcall(function() clickSound:Stop() clickSound:Play() end) end)
 end
 
 Shared.Connections = Shared.Connections or {}
@@ -31,8 +39,13 @@ if Shared.Connections[key] then
 end
 Shared.Connections[key] = {}
 
-local old = CoreGui:FindFirstChild("SchmecktESPPanel")
-if old then old:Destroy() end
+Shared.EspPlayers = Shared.EspPlayers or false
+Shared.TracersEnabled = Shared.TracersEnabled or false
+Shared.EspWeapons = Shared.EspWeapons or false
+Shared.EspFood = Shared.EspFood or false
+
+local oldPanel = CoreGui:FindFirstChild("SchmecktESPPanel")
+if oldPanel then oldPanel:Destroy() end
 local oldOverlay = CoreGui:FindFirstChild("SchmecktESPOverlay")
 if oldOverlay then oldOverlay:Destroy() end
 
@@ -51,26 +64,20 @@ if map and map:FindFirstChild("Pads") then
     end
 end
 
-local state = {
-    EspPlayers = true,
-    TracersEnabled = true,
-    EspWeapons = false,
-    EspFood = false
+local COL = {
+    BgMain = Color3.fromRGB(14, 10, 10),
+    StrokeMain = Color3.fromRGB(150, 30, 30),
+    Div = Color3.fromRGB(60, 15, 15),
+    RowBg = Color3.fromRGB(20, 14, 14),
+    RowStroke = Color3.fromRGB(50, 20, 20),
+    TextOn = Color3.fromRGB(255, 255, 255),
+    TextOff = Color3.fromRGB(160, 120, 120),
+    ToggleBgOn = Color3.fromRGB(200, 40, 40),
+    ToggleBgOff = Color3.fromRGB(40, 20, 20),
+    Dot = Color3.fromRGB(255, 255, 255),
+    ESP = Color3.fromRGB(160, 0, 0),
+    ESP_Outline = Color3.fromRGB(255, 80, 80)
 }
-
-local Theme = {
-    Background = Color3.fromRGB(20, 5, 15),
-    Card = Color3.fromRGB(45, 12, 35),
-    Accent = Color3.fromRGB(255, 20, 147),
-    Purple = Color3.fromRGB(170, 0, 255),
-    PurpleLight = Color3.fromRGB(220, 130, 255),
-    Text = Color3.fromRGB(255, 255, 255),
-    SubText = Color3.fromRGB(255, 150, 180),
-    Stroke = Color3.fromRGB(150, 30, 100),
-}
-
-local LOGO_ASSET = "rbxassetid://121759217057084"
-local LOGO2_ASSET = "rbxassetid://118676632373972"
 
 local weaponNames = {
     ["[Silencer]"] = true,
@@ -96,184 +103,130 @@ overlay.IgnoreGuiInset = true
 overlay.ResetOnSpawn = false
 overlay.Parent = CoreGui
 
+local ROW_H = s(36)
+local GAP = s(6)
+local headerH = s(40)
+local toggleCount = 4
+local contentPad = s(10)
+local contentInner = (ROW_H * toggleCount) + (GAP * (toggleCount - 1)) + contentPad * 2
+local panelW = s(250)
+local panelH = headerH + contentInner + s(2)
+
 local MainFrame = Instance.new("Frame")
 MainFrame.Name = "MainFrame"
-MainFrame.Size = scaleUDim(250, 240)
-MainFrame.Position = UDim2.new(0, 10 * SCALE, 0.5, 110 * SCALE)
-MainFrame.BackgroundColor3 = Theme.Background
-MainFrame.BackgroundTransparency = 0.02
+MainFrame.Size = UDim2.new(0, panelW, 0, panelH)
+MainFrame.Position = UDim2.new(0, s(40), 0.5, s(120))
+MainFrame.BackgroundColor3 = COL.BgMain
 MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Draggable = true
 MainFrame.Parent = gui
-Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 14 * SCALE)
+Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, s(8))
+local MainStroke = Instance.new("UIStroke", MainFrame)
+MainStroke.Color = COL.StrokeMain
+MainStroke.Thickness = 1
 
-local MainStroke = Instance.new("UIStroke")
-MainStroke.Thickness = 2 * SCALE
-MainStroke.Transparency = 0
-MainStroke.Parent = MainFrame
+local PanelTitle = Instance.new("TextLabel", MainFrame)
+PanelTitle.Size = UDim2.new(1, -s(20), 0, s(40))
+PanelTitle.Position = UDim2.new(0, s(16), 0, 0)
+PanelTitle.BackgroundTransparency = 1
+PanelTitle.Text = "Visuals & ESP"
+PanelTitle.TextColor3 = COL.TextOn
+PanelTitle.Font = Enum.Font.GothamBold
+PanelTitle.TextSize = s(14)
+PanelTitle.TextXAlignment = Enum.TextXAlignment.Left
 
-local mainStrokeGrad = Instance.new("UIGradient")
-mainStrokeGrad.Rotation = 90
-mainStrokeGrad.Color = ColorSequence.new({
-    ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 20, 147)),
-    ColorSequenceKeypoint.new(0.5, Color3.fromRGB(180, 50, 255)),
-    ColorSequenceKeypoint.new(1, Color3.fromRGB(220, 20, 60))
-})
-mainStrokeGrad.Parent = MainStroke
+local PanelDiv = Instance.new("Frame", MainFrame)
+PanelDiv.Size = UDim2.new(1, 0, 0, math.max(1, s(1)))
+PanelDiv.Position = UDim2.new(0, 0, 0, s(40))
+PanelDiv.BackgroundColor3 = COL.Div
+PanelDiv.BorderSizePixel = 0
 
-local HeaderFrame = Instance.new("Frame")
-HeaderFrame.Name = "Header"
-HeaderFrame.Size = UDim2.new(1, 0, 0, 50 * SCALE)
-HeaderFrame.BackgroundColor3 = Theme.Card
-HeaderFrame.BorderSizePixel = 0
-HeaderFrame.Parent = MainFrame
-Instance.new("UICorner", HeaderFrame).CornerRadius = UDim.new(0, 14 * SCALE)
+local InnerContainer = Instance.new("Frame", MainFrame)
+InnerContainer.Size = UDim2.new(1, 0, 1, -s(41))
+InnerContainer.Position = UDim2.new(0, 0, 0, s(41))
+InnerContainer.BackgroundTransparency = 1
+InnerContainer.Parent = MainFrame
 
-local headerGlow = Instance.new("Frame")
-headerGlow.Size = UDim2.new(1, 0, 1, 0)
-headerGlow.BackgroundColor3 = Theme.Purple
-headerGlow.BackgroundTransparency = 0.88
-headerGlow.BorderSizePixel = 0
-headerGlow.Parent = HeaderFrame
-Instance.new("UICorner", headerGlow).CornerRadius = UDim.new(0, 14 * SCALE)
-
-local HeaderLogo1 = Instance.new("ImageLabel")
-HeaderLogo1.Size = scaleUDim(28, 28)
-HeaderLogo1.Position = UDim2.new(0, 10 * SCALE, 0.5, -(14 * SCALE))
-HeaderLogo1.BackgroundColor3 = Theme.Background
-HeaderLogo1.Image = LOGO_ASSET
-HeaderLogo1.ScaleType = Enum.ScaleType.Crop
-HeaderLogo1.Parent = HeaderFrame
-Instance.new("UICorner", HeaderLogo1).CornerRadius = UDim.new(0, 6 * SCALE)
-
-local HeaderX = Instance.new("TextLabel")
-HeaderX.Size = scaleUDim(14, 28)
-HeaderX.Position = UDim2.new(0, 40 * SCALE, 0.5, -(14 * SCALE))
-HeaderX.BackgroundTransparency = 1
-HeaderX.Text = "X"
-HeaderX.Font = Enum.Font.GothamBlack
-HeaderX.TextSize = scaleSize(10)
-HeaderX.TextColor3 = Theme.Purple
-HeaderX.Parent = HeaderFrame
-
-local HeaderLogo2 = Instance.new("ImageLabel")
-HeaderLogo2.Size = scaleUDim(24, 24)
-HeaderLogo2.Position = UDim2.new(0, 56 * SCALE, 0.5, -(12 * SCALE))
-HeaderLogo2.BackgroundTransparency = 1
-HeaderLogo2.Image = LOGO2_ASSET
-HeaderLogo2.ScaleType = Enum.ScaleType.Fit
-HeaderLogo2.Parent = HeaderFrame
-Instance.new("UICorner", HeaderLogo2).CornerRadius = UDim.new(1, 0)
-
-local HeaderText = Instance.new("TextLabel")
-HeaderText.Size = UDim2.new(1, -(90 * SCALE), 0, 18 * SCALE)
-HeaderText.Position = UDim2.new(0, 88 * SCALE, 0, 8 * SCALE)
-HeaderText.BackgroundTransparency = 1
-HeaderText.Text = "VISUALS"
-HeaderText.Font = Enum.Font.GothamBlack
-HeaderText.TextSize = scaleSize(11)
-HeaderText.TextColor3 = Theme.Accent
-HeaderText.TextXAlignment = Enum.TextXAlignment.Left
-HeaderText.Parent = HeaderFrame
-
-local headerTextGrad = Instance.new("UIGradient")
-headerTextGrad.Rotation = 0
-headerTextGrad.Color = ColorSequence.new({
-    ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 20, 147)),
-    ColorSequenceKeypoint.new(0.5, Color3.fromRGB(180, 50, 255)),
-    ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 105, 180))
-})
-headerTextGrad.Parent = HeaderText
-
-local HeaderSub = Instance.new("TextLabel")
-HeaderSub.Size = UDim2.new(1, -(90 * SCALE), 0, 14 * SCALE)
-HeaderSub.Position = UDim2.new(0, 88 * SCALE, 0, 26 * SCALE)
-HeaderSub.BackgroundTransparency = 1
-HeaderSub.Text = "Purple ESP"
-HeaderSub.Font = Enum.Font.GothamMedium
-HeaderSub.TextSize = scaleSize(9)
-HeaderSub.TextColor3 = Theme.SubText
-HeaderSub.TextXAlignment = Enum.TextXAlignment.Left
-HeaderSub.Parent = HeaderFrame
-
-local ButtonContainer = Instance.new("Frame")
-ButtonContainer.Name = "ButtonContainer"
-ButtonContainer.Size = UDim2.new(1, -(16 * SCALE), 0, 170 * SCALE)
-ButtonContainer.Position = UDim2.new(0, 8 * SCALE, 0, 60 * SCALE)
-ButtonContainer.BackgroundTransparency = 1
-ButtonContainer.Parent = MainFrame
-
-local ListLayout = Instance.new("UIListLayout")
+local ListLayout = Instance.new("UIListLayout", InnerContainer)
 ListLayout.SortOrder = Enum.SortOrder.LayoutOrder
-ListLayout.Padding = UDim.new(0, 6 * SCALE)
-ListLayout.Parent = ButtonContainer
+ListLayout.Padding = UDim.new(0, s(6))
+ListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+Instance.new("UIPadding", InnerContainer).PaddingTop = UDim.new(0, s(10))
 
-local function CreateToggleButton(text, sharedKey)
-    local BtnFrame = Instance.new("Frame")
-    BtnFrame.Size = UDim2.new(1, 0, 0, 32 * SCALE)
-    BtnFrame.BackgroundColor3 = Theme.Card
-    BtnFrame.BorderSizePixel = 0
-    BtnFrame.Parent = ButtonContainer
-    Instance.new("UICorner", BtnFrame).CornerRadius = UDim.new(0, 8 * SCALE)
+local function CreateToggleButton(text, sharedKey, order)
+    local Row = Instance.new("Frame", InnerContainer)
+    Row.Size = UDim2.new(0.9, 0, 0, ROW_H)
+    Row.BackgroundColor3 = COL.RowBg
+    Row.LayoutOrder = order
+    Instance.new("UICorner", Row).CornerRadius = UDim.new(0, s(6))
+    Instance.new("UIStroke", Row).Color = COL.RowStroke
 
-    local BtnStroke = Instance.new("UIStroke")
-    BtnStroke.Color = state[sharedKey] and Theme.Purple or Theme.Stroke
-    BtnStroke.Thickness = 1.5 * SCALE
-    BtnStroke.Transparency = state[sharedKey] and 0 or 0.3
-    BtnStroke.Parent = BtnFrame
+    local Label = Instance.new("TextLabel", Row)
+    Label.Size = UDim2.new(0.65, 0, 1, 0)
+    Label.Position = UDim2.new(0, s(12), 0, 0)
+    Label.BackgroundTransparency = 1
+    Label.Text = text
+    Label.Font = Enum.Font.GothamSemibold
+    Label.TextSize = s(13)
+    Label.TextColor3 = Shared[sharedKey] and COL.TextOn or COL.TextOff
+    Label.TextXAlignment = Enum.TextXAlignment.Left
 
-    local TextLabel = Instance.new("TextLabel")
-    TextLabel.Size = UDim2.new(1, -(55 * SCALE), 1, 0)
-    TextLabel.Position = UDim2.new(0, 12 * SCALE, 0, 0)
-    TextLabel.BackgroundTransparency = 1
-    TextLabel.Text = text
-    TextLabel.Font = Enum.Font.GothamBold
-    TextLabel.TextSize = scaleSize(11)
-    TextLabel.TextColor3 = Theme.Text
-    TextLabel.TextXAlignment = Enum.TextXAlignment.Left
-    TextLabel.Parent = BtnFrame
-
-    local ToggleBg = Instance.new("Frame")
-    ToggleBg.Size = scaleUDim(36, 18)
-    ToggleBg.Position = UDim2.new(1, -(44 * SCALE), 0.5, -(9 * SCALE))
-    ToggleBg.BackgroundColor3 = state[sharedKey] and Theme.Purple or Color3.fromRGB(40, 20, 30)
-    ToggleBg.BorderSizePixel = 0
-    ToggleBg.Parent = BtnFrame
+    local ToggleBg = Instance.new("Frame", Row)
+    ToggleBg.Size = UDim2.new(0, s(40), 0, s(20))
+    ToggleBg.Position = UDim2.new(1, -s(50), 0.5, -s(10))
+    ToggleBg.BackgroundColor3 = Shared[sharedKey] and COL.ToggleBgOn or COL.ToggleBgOff
     Instance.new("UICorner", ToggleBg).CornerRadius = UDim.new(1, 0)
 
-    local ToggleCircle = Instance.new("Frame")
-    ToggleCircle.Size = scaleUDim(14, 14)
-    ToggleCircle.Position = state[sharedKey] and UDim2.new(0, 20 * SCALE, 0.5, -(7 * SCALE)) or UDim2.new(0, 2 * SCALE, 0.5, -(7 * SCALE))
-    ToggleCircle.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-    ToggleCircle.BorderSizePixel = 0
-    ToggleCircle.Parent = ToggleBg
-    Instance.new("UICorner", ToggleCircle).CornerRadius = UDim.new(1, 0)
+    local ToggleDot = Instance.new("Frame", ToggleBg)
+    ToggleDot.Size = UDim2.new(0, s(14), 0, s(14))
+    ToggleDot.Position = Shared[sharedKey] and UDim2.new(0, s(23), 0.5, -s(7)) or UDim2.new(0, s(3), 0.5, -s(7))
+    ToggleDot.BackgroundColor3 = COL.Dot
+    Instance.new("UICorner", ToggleDot).CornerRadius = UDim.new(1, 0)
 
-    local Button = Instance.new("TextButton")
-    Button.Size = UDim2.new(1, 0, 1, 0)
-    Button.BackgroundTransparency = 1
-    Button.Text = ""
-    Button.Parent = BtnFrame
+    local btn = Instance.new("TextButton", Row)
+    btn.Size = UDim2.new(1, 0, 1, 0)
+    btn.BackgroundTransparency = 1
+    btn.Text = ""
 
-    Button.MouseButton1Click:Connect(function()
-        state[sharedKey] = not state[sharedKey]
-        local enabled = state[sharedKey]
-        TweenService:Create(ToggleCircle, TweenInfo.new(0.2, Enum.EasingStyle.Quart), {
-            Position = enabled and UDim2.new(0, 20 * SCALE, 0.5, -(7 * SCALE)) or UDim2.new(0, 2 * SCALE, 0.5, -(7 * SCALE))
-        }):Play()
-        TweenService:Create(ToggleBg, TweenInfo.new(0.2, Enum.EasingStyle.Quart), {
-            BackgroundColor3 = enabled and Theme.Purple or Color3.fromRGB(40, 20, 30)
-        }):Play()
-        TweenService:Create(BtnStroke, TweenInfo.new(0.2), {
-            Color = enabled and Theme.Purple or Theme.Stroke,
-            Transparency = enabled and 0 or 0.3
-        }):Play()
+    btn.MouseButton1Click:Connect(function()
+        playClick()
+        Shared[sharedKey] = not Shared[sharedKey]
+        local st = Shared[sharedKey]
+        
+        TweenService:Create(ToggleDot, TweenInfo.new(0.2), {Position = st and UDim2.new(0, s(23), 0.5, -s(7)) or UDim2.new(0, s(3), 0.5, -s(7))}):Play()
+        TweenService:Create(ToggleBg, TweenInfo.new(0.2), {BackgroundColor3 = st and COL.ToggleBgOn or COL.ToggleBgOff}):Play()
+        TweenService:Create(Label, TweenInfo.new(0.2), {TextColor3 = st and COL.TextOn or COL.TextOff}):Play()
     end)
 end
 
-CreateToggleButton("Player Chams", "EspPlayers")
-CreateToggleButton("Tracers", "TracersEnabled")
-CreateToggleButton("ESP Weapons", "EspWeapons")
-CreateToggleButton("ESP Food", "EspFood")
+CreateToggleButton("Player Chams", "EspPlayers", 1)
+CreateToggleButton("Tracers", "TracersEnabled", 2)
+CreateToggleButton("ESP Weapons", "EspWeapons", 3)
+CreateToggleButton("ESP Food", "EspFood", 4)
+
+local dragging, dragInput, dragStart, startPos
+MainFrame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = MainFrame.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then dragging = false end
+        end)
+    end
+end)
+MainFrame.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
+end)
+table.insert(Shared.Connections[key], UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        local delta = input.Position - dragStart
+        MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end))
 
 local lines = {}
 local function getLine()
@@ -283,7 +236,7 @@ local function getLine()
     local line = Instance.new("Frame")
     line.Name = "Tracer"
     line.AnchorPoint = Vector2.new(0.5, 0.5)
-    line.BackgroundColor3 = Theme.Purple
+    line.BackgroundColor3 = COL.ESP
     line.BorderSizePixel = 0
     line.Parent = overlay
     line.Visible = false
@@ -361,11 +314,16 @@ local function updateESP()
     for _, line in ipairs(lines) do line.Visible = false end
 
     if not Shared.VisualPanel then
+        gui.Enabled = false
+        overlay.Enabled = false
         cleanAllESP()
         return
     end
 
-    if state.EspPlayers then
+    gui.Enabled = true
+    overlay.Enabled = true
+
+    if Shared.EspPlayers then
         for _, plr in pairs(Players:GetPlayers()) do
             if plr ~= lp and plr.Character then
                 local char = plr.Character
@@ -375,10 +333,10 @@ local function updateESP()
                     if not char:FindFirstChild("SchmecktHighlight") then
                         local hl = Instance.new("Highlight")
                         hl.Name = "SchmecktHighlight"
-                        hl.FillColor = Theme.Purple
-                        hl.OutlineColor = Color3.fromRGB(255, 255, 255)
-                        hl.FillTransparency = 0.6
-                        hl.OutlineTransparency = 0.5
+                        hl.FillColor = COL.ESP
+                        hl.OutlineColor = COL.ESP_Outline
+                        hl.FillTransparency = 0.5
+                        hl.OutlineTransparency = 0.2
                         hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
                         hl.Parent = char
                     end
@@ -389,7 +347,7 @@ local function updateESP()
         removeAllHighlights()
     end
 
-    if state.TracersEnabled then
+    if Shared.TracersEnabled then
         for _, plr in pairs(Players:GetPlayers()) do
             if plr ~= lp and plr.Character then
                 local root = plr.Character:FindFirstChild("HumanoidRootPart")
@@ -415,7 +373,7 @@ local function updateESP()
 
     local padsFolder = getPadsFolder()
     if padsFolder then
-        if state.EspWeapons then
+        if Shared.EspWeapons then
             for _, pad in ipairs(padsFolder:GetChildren()) do
                 if weaponNames[pad.Name] then
                     ensurePadBillboard(pad, pad.Name, Color3.fromRGB(255, 50, 50))
@@ -429,7 +387,7 @@ local function updateESP()
             end
         end
 
-        if state.EspFood then
+        if Shared.EspFood then
             for _, pad in ipairs(padsFolder:GetChildren()) do
                 if foodNames[pad.Name] then
                     ensurePadBillboard(pad, pad.Name, Color3.fromRGB(50, 255, 100))
@@ -445,32 +403,9 @@ local function updateESP()
     end
 end
 
-table.insert(Shared.Connections[key], RunService.RenderStepped:Connect(updateESP))
+local renderConn = RunService.RenderStepped:Connect(updateESP)
+table.insert(Shared.Connections[key], renderConn)
 
-local dragging, dragInput, dragStart, startPos
-MainFrame.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        dragging = true
-        dragStart = input.Position
-        startPos = MainFrame.Position
-    end
-end)
-MainFrame.InputChanged:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-        dragInput = input
-    end
-end)
-UserInputService.InputChanged:Connect(function(input)
-    if input == dragInput and dragging then
-        local delta = input.Position - dragStart
-        MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-    end
-end)
-UserInputService.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        dragging = false
-    end
-end)
-
+local FINAL_SIZE = UDim2.new(0, panelW, 0, panelH)
 MainFrame.Size = UDim2.new(0, 0, 0, 0)
-TweenService:Create(MainFrame, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Size = scaleUDim(250, 240)}):Play()
+TweenService:Create(MainFrame, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Size = FINAL_SIZE}):Play()
